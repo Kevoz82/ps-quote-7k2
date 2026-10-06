@@ -108,8 +108,16 @@ canvas{width:100%;height:200px;border:2px dashed var(--line);border-radius:10px;
   <div class="card">
     <h2>Acceptance</h2>
     <label class="chk"><input type="checkbox" id="agree"> <span>I/We have read, understood and accept the services, fees and terms above.</span></label>
-    <label for="signName">Full name(s) of person(s) accepting</label>
-    <input type="text" id="signName" autocomplete="off">
+    <div id="signNameBox">
+      <label for="signName">Full name(s) of person(s) accepting</label>
+      <input type="text" id="signName" autocomplete="off">
+    </div>
+    <label class="chk"><input type="checkbox" id="isPoa"> <span>This is being signed by a Power of Attorney on behalf of the client</span></label>
+    <div id="poaBox" class="hide">
+      <label for="poaName">Power of Attorney's full name</label>
+      <input type="text" id="poaName" autocomplete="off">
+      <p class="hint">Signing on behalf of <b id="poaFor"></b>.</p>
+    </div>
     <label>Signature</label>
     <canvas id="sig"></canvas>
     <div style="margin-top:10px"><button class="sec" id="clearSig">Clear signature</button></div>
@@ -685,8 +693,16 @@ cv.addEventListener("pointerdown",e=>{drawing=true;cv.setPointerCapture(e.pointe
 cv.addEventListener("pointermove",e=>{if(!drawing)return;const[p,q]=pos(e);cx.lineTo(p,q);cx.stroke();signed=true;check()});
 ["pointerup","pointercancel"].forEach(ev=>cv.addEventListener(ev,()=>drawing=false));
 $("clearSig").onclick=()=>{cx.clearRect(0,0,cv.width,cv.height);signed=false;check()};
-["agree","signName"].forEach(id=>$(id).addEventListener("input",check));
-function check(){if(step===2)$("nextBtn").disabled=!($("agree").checked&&$("signName").value.trim()&&signed)}
+["agree","signName","poaName","isPoa"].forEach(id=>$(id).addEventListener("input",check));
+$("isPoa").addEventListener("change",()=>{
+  const on=$("isPoa").checked;
+  $("poaBox").classList.toggle("hide",!on);
+  $("signNameBox").classList.toggle("hide",on);
+  $("poaFor").textContent=$("cname").value.trim();
+  check();
+});
+const signer=()=>$("isPoa").checked?$("poaName").value.trim():$("signName").value.trim();
+function check(){if(step===2)$("nextBtn").disabled=!($("agree").checked&&signer()&&signed)}
 
 /* ============ FLOW ============ */
 function show(n){
@@ -708,12 +724,13 @@ $("nextBtn").onclick=async()=>{
     $("guideBody").innerHTML=guideHtml();
     $("signName").value=name;
     $("agree").checked=false;
+    $("isPoa").checked=false;$("poaName").value="";$("poaBox").classList.add("hide");$("signNameBox").classList.remove("hide");
     show(2);
   } else if(step===2){
     const t=totals(),name=$("cname").value.trim();
     accepted={
       acceptedAt:new Date().toISOString(),
-      clientName:name,clientEmail:$("cemail").value.trim(),signedBy:$("signName").value.trim(),
+      clientName:name,clientEmail:$("cemail").value.trim(),signedBy:signer(),poa:$("isPoa").checked,poaName:$("isPoa").checked?signer():"",
       lineItems:t.L.map(l=>({description:l.desc,amount:l.amount,kind:l.kind})),
       hasPension:t.L.some(l=>l.desc.startsWith("Age Pension")),hasAged:t.L.some(l=>l.kind==="core"&&!l.desc.startsWith("Age Pension")),
       discount:t.disc,total:t.total,gst:t.gst,gstIncluded:CONFIG.gstIncluded,
@@ -732,10 +749,10 @@ $("nextBtn").onclick=async()=>{
     } else {
       invoiceNote=`<div class="warn noprint">Xero invoice not created automatically (no webhook set up). Please raise it manually: <b>${name}</b>, <b>${money(t.total)}</b> incl. GST.</div>`;
     }
-    $("doneMsg").innerHTML=`Accepted by <b>${accepted.signedBy}</b> on ${today()}. Thank you.`;
+    $("doneMsg").innerHTML=accepted.poa?`Accepted by <b>${accepted.signedBy}</b> as Power of Attorney for <b>${name}</b> on ${today()}. Thank you.`:`Accepted by <b>${accepted.signedBy}</b> on ${today()}. Thank you.`;
     $("invMsg").innerHTML=invoiceNote;
     $("doneTerms").innerHTML=`<h2>Terms and Conditions</h2>`+termsHtml(t,name)
-      +`<h3>Signed</h3><p>${accepted.signedBy} — ${today()}</p><img alt="signature" src="${accepted.signature}" style="max-width:320px;border-bottom:1px solid #999">`;
+      +`<h3>Signed</h3><p>${accepted.poa?accepted.signedBy+" as Power of Attorney for "+name:accepted.signedBy} — ${today()}</p><img alt="signature" src="${accepted.signature}" style="max-width:320px;border-bottom:1px solid #999">`;
     show(3);
   }
 };
@@ -902,8 +919,11 @@ function buildPdf(a){
   d.setFont("helvetica","normal");d.setFontSize(10.5);
   d.addImage(a.signature,"PNG",M,y,70,35);y+=36;
   d.setDrawColor(...INK);d.setLineWidth(.3);d.line(M,y,M+75,y);d.line(M+95,y,W-M,y);y+=5;
-  d.setFontSize(9);d.text("Signature",M,y);d.text("Date: "+today(),M+95,y);y+=7;
-  txt("I, "+a.signedBy+", acknowledge and accept the terms of this letter of engagement and agree to engage "+CONFIG.businessName+" for the services checked.",{s:10});
+  d.setFontSize(9);d.text(a.poa?"Signature of Power of Attorney":"Signature",M,y);d.text("Date: "+today(),M+95,y);y+=7;
+  txt(a.poa
+    ?"I, "+a.signedBy+", as Power of Attorney for "+a.clientName+", acknowledge and accept the terms of this letter of engagement on their behalf and agree to engage "+CONFIG.businessName+" for the services checked. I confirm I am authorised to act for "+a.clientName+"."
+    :"I, "+a.signedBy+", acknowledge and accept the terms of this letter of engagement and agree to engage "+CONFIG.businessName+" for the services checked.",{s:10});
+  if(a.poa)txt("Client: "+a.clientName+"     Attorney: "+a.signedBy,{s:10});
   y+=2;
   addGuideToPdf(d,{M,W,TW,BLUE,INK});
   const foot=[CONFIG.businessName,CONFIG.abn&&"ABN "+CONFIG.abn,CONFIG.businessEmail,CONFIG.businessPhone].filter(Boolean).join("  |  ");
