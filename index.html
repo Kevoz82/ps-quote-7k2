@@ -57,7 +57,10 @@ canvas{width:100%;height:200px;border:2px dashed var(--line);border-radius:10px;
   <div class="card">
     <h2>Client</h2>
     <div class="grid">
-      <div><label for="cname">Client name(s)</label><input type="text" id="cname" autocomplete="off"></div>
+      <div><label for="cfirst">Client first name</label><input type="text" id="cfirst" autocomplete="off"></div>
+      <div><label for="clast">Client last name</label><input type="text" id="clast" autocomplete="off"></div>
+      <div><label for="pfirst">Partner first name <span class="hint">(if applicable)</span></label><input type="text" id="pfirst" autocomplete="off"></div>
+      <div><label for="plast">Partner last name</label><input type="text" id="plast" autocomplete="off"><div class="hint">Copies the client's last name. Type over it if different.</div></div>
       <div><label for="cemail">Client email</label><input type="email" id="cemail" autocomplete="off"></div>
     </div>
   </div>
@@ -602,7 +605,19 @@ document.querySelectorAll("#typeSeg button").forEach(b=>b.onclick=()=>{
   if(type==="pension")$("aged").value="";
   calc();
 });
-["pension","aged","smsf","props","biz","comp","trust","cname","cemail"].forEach(id=>$(id).addEventListener("input",calc));
+let plastEdited=false;
+$("plast").addEventListener("input",()=>{plastEdited=$("plast").value.trim()!==""&&$("plast").value!==$("clast").value});
+$("clast").addEventListener("input",()=>{if(!plastEdited)$("plast").value=$("clast").value});
+const T=id=>$(id).value.trim();
+function names(){
+  const cf=T("cfirst"),cl=T("clast"),pf=T("pfirst"),pl=T("plast");
+  const client=[cf,cl].filter(Boolean).join(" ");
+  if(!pf)return {client,full:client,dear:cf||client,partner:""};
+  const partner=[pf,pl].filter(Boolean).join(" ");
+  const full=(pl&&pl.toLowerCase()===cl.toLowerCase())?`${cf} and ${pf} ${cl}`:`${client} and ${partner}`;
+  return {client,full,dear:`${cf} and ${pf}`,partner};
+}
+["pension","aged","smsf","props","biz","comp","trust","cfirst","clast","pfirst","plast","cemail"].forEach(id=>$(id).addEventListener("input",calc));
 
 function lineItems(){
   const L=[];
@@ -634,7 +649,7 @@ function calc(){
   $("summary").innerHTML+=`<tr class="tot"><td>Total${CONFIG.gstIncluded?" (incl. GST)":" (incl. GST "+money(t.gst)+")"}</td><td>${money(t.total)}</td></tr>`;
   $("priceNote").textContent=CONFIG.gstIncluded?`Includes GST of ${money(t.gst)}.`:`GST of ${money(t.gst)} added.`;
   $("barTotal").textContent=money(t.total);
-  $("nextBtn").disabled=!(t.L.some(l=>l.kind==="core")&&$("cname").value.trim());
+  $("nextBtn").disabled=!(t.L.some(l=>l.kind==="core")&&T("cfirst")&&T("clast")&&(!T("pfirst")||T("plast")));
 }
 calc();
 
@@ -698,7 +713,7 @@ $("isPoa").addEventListener("change",()=>{
   const on=$("isPoa").checked;
   $("poaBox").classList.toggle("hide",!on);
   $("signNameBox").classList.toggle("hide",on);
-  $("poaFor").textContent=$("cname").value.trim();
+  $("poaFor").textContent=names().full;
   check();
 });
 const signer=()=>$("isPoa").checked?$("poaName").value.trim():$("signName").value.trim();
@@ -718,7 +733,7 @@ $("backBtn").onclick=()=>show(1);
 let accepted=null;
 $("nextBtn").onclick=async()=>{
   if(step===1){
-    const t=totals(),name=$("cname").value.trim();
+    const t=totals(),name=names().full;
     $("termsMeta").textContent=`Prepared for ${name} on ${today()}`;
     $("termsBody").innerHTML=termsHtml(t,name);
     $("guideBody").innerHTML=guideHtml();
@@ -727,13 +742,18 @@ $("nextBtn").onclick=async()=>{
     $("isPoa").checked=false;$("poaName").value="";$("poaBox").classList.add("hide");$("signNameBox").classList.remove("hide");
     show(2);
   } else if(step===2){
-    const t=totals(),name=$("cname").value.trim();
+    const t=totals(),nm=names(),name=nm.full;
     accepted={
       acceptedAt:new Date().toISOString(),
-      clientName:name,clientEmail:$("cemail").value.trim(),signedBy:signer(),poa:$("isPoa").checked,poaName:$("isPoa").checked?signer():"",
+      clientName:name,dearName:nm.dear,clientFirstName:T("cfirst"),clientLastName:T("clast"),partnerFirstName:T("pfirst"),partnerLastName:T("plast"),clientEmail:$("cemail").value.trim(),signedBy:signer(),poa:$("isPoa").checked,poaName:$("isPoa").checked?signer():"",
       lineItems:t.L.map(l=>({description:l.desc,amount:l.amount,kind:l.kind})),
       hasPension:t.L.some(l=>l.desc.startsWith("Age Pension")),hasAged:t.L.some(l=>l.kind==="core"&&!l.desc.startsWith("Age Pension")),
       discount:t.disc,total:t.total,gst:t.gst,gstIncluded:CONFIG.gstIncluded,
+      claims:t.L.filter(l=>l.kind==="core").map(l=>({
+        claimType:l.desc.startsWith("Age Pension")?"Age Pension":"Aged Care Application",
+        claimStatus:"Not Commenced",claimStarted:new Date().toISOString().slice(0,10),
+        claimDetails:l.desc+" - "+money(l.amount)+(nm.partner?" (couple: "+nm.full+")":"")+($("isPoa").checked?" - PoA: "+signer():"")
+      })),
       dueDays:CONFIG.paymentTermsDays,
       signature:cv.toDataURL("image/png")
     };
@@ -882,7 +902,7 @@ function buildPdf(a){
   d.setDrawColor(...BLUE);d.setLineWidth(.8);d.line(M,y+22,W-M,y+22);y+=32;
   txt("LETTER OF ENGAGEMENT",{b:1,s:17,c:BLUE,after:5});
   txt("Date: "+today(),{after:3});
-  txt("Dear "+a.clientName+",",{after:4});
+  txt("Dear "+(a.dearName||a.clientName)+",",{after:4});
   txt("RE: LETTER OF ENGAGEMENT FOR "+(a.hasPension&&a.hasAged?"AGE PENSION AND AGED CARE":a.hasAged?"AGED CARE":"AGE PENSION")+" SERVICES",{b:1,after:4});
   txt("We are pleased that you have chosen "+CONFIG.businessName+" to assist you. The purpose of this letter is to confirm our understanding of the services we will provide and the fees for those services.",{after:4});
   txt("Based on our discussions, we understand that you wish to engage us for the following services:",{after:3});
